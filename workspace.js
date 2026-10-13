@@ -97,7 +97,8 @@
 
 	// ---- export ----
 
-	// the whole drawing, cropped to its content, on the board's background
+	// the whole drawing, cropped to its content, on the board's background.
+	// ExportProtection makes the image itself, so it is always signed.
 	function renderPNG() {
 		var box = contentBounds() || { 'left': 0, 'top': 0, 'right': 600, 'bottom': 360 };
 		var margin = 24;
@@ -125,14 +126,28 @@
 			view.y = saved.y;
 		}
 
-		var image = document.createElement('canvas');
-		image.width = layer.width;
-		image.height = layer.height;
-		var context = image.getContext('2d');
-		context.fillStyle = BOARD_COLOR;
-		context.fillRect(0, 0, image.width, image.height);
-		context.drawImage(layer, 0, 0);
-		return image.toDataURL('image/png');
+		return ExportProtection.png(layer, { 'scale': scale, 'background': BOARD_COLOR });
+	}
+
+	// an export that could not be signed is not shown, copied or downloaded
+	function blockExport(error) {
+		exported = '';
+		el.preview.removeAttribute('src');
+		el.output.value = '';
+		el.preview.hidden = el.output.hidden = true;
+		el.download.disabled = el.copy.disabled = true;
+		el.exportStatus.textContent = /^Export blocked/.test(error && error.message) ? error.message : 'Export blocked: the image could not be signed.';
+	}
+
+	// true when what is about to leave is the signed image the export made
+	function verified() {
+		if(format != 'png' && format != 'svg') return true;
+		try {
+			return ExportProtection.verify(format, exported);
+		} catch(error) {
+			blockExport(error);
+			return false;
+		}
 	}
 
 	function setFormat(next) {
@@ -141,11 +156,15 @@
 		for(var i = 0; i < buttons.length; i++) {
 			buttons[i].setAttribute('aria-pressed', String(buttons[i].getAttribute('data-format') == format));
 		}
-		if(format == 'png') {
-			exported = renderPNG();
-			el.preview.src = exported;
-		} else if(format == 'svg') {
-			exported = saveAsSVG();
+		el.download.disabled = el.copy.disabled = false;
+		if(format == 'png' || format == 'svg') {
+			try {
+				exported = format == 'png' ? renderPNG() : saveAsSVG();
+			} catch(error) {
+				blockExport(error);
+				return;
+			}
+			if(format == 'png') el.preview.src = exported;
 		} else if(format == 'latex') {
 			exported = saveAsLaTeX();
 		} else {
@@ -158,6 +177,7 @@
 	}
 
 	function download() {
+		if(!verified()) return;
 		var link = document.createElement('a');
 		link.download = FORMATS[format].file;
 		var url = format == 'png' ? exported : URL.createObjectURL(new Blob([exported], { 'type': FORMATS[format].type }));
@@ -172,6 +192,7 @@
 	}
 
 	function copy() {
+		if(!verified()) return;
 		function done() {
 			el.exportStatus.textContent = 'Copied.';
 		}
@@ -248,7 +269,7 @@
 			'accept': 'tool-accept', 'remove': 'tool-delete', 'undo': 'tool-undo', 'redo': 'tool-redo', 'clear': 'tool-clear',
 			'labelEditor': 'label-editor', 'labelCaption': 'label-caption', 'labelInput': 'label-input', 'labelHint': 'label-hint',
 			'zoomLevel': 'zoom-level', 'helpDialog': 'help-dialog', 'exportDialog': 'export-dialog', 'preview': 'export-preview',
-			'output': 'output', 'copy': 'export-copy', 'exportStatus': 'export-status', 'importFile': 'import-file',
+			'output': 'output', 'copy': 'export-copy', 'download': 'export-download', 'exportStatus': 'export-status', 'importFile': 'import-file',
 		};
 		for(var name in ids) {
 			if(ids[name]) el[name] = byId(ids[name]);
@@ -341,7 +362,7 @@
 		for(var i = 0; i < formatButtons.length; i++) {
 			formatButtons[i].onclick = function() { setFormat(this.getAttribute('data-format')); };
 		}
-		byId('export-download').onclick = download;
+		el.download.onclick = download;
 		el.copy.onclick = copy;
 
 		var dialogs = [el.helpDialog, el.exportDialog];

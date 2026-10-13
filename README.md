@@ -15,7 +15,7 @@ Try it: <https://www.nafees.info/gnu-projects/statetrace>
 - **DFA and NFA**: the machine's kind is detected from the diagram. For an NFA, every state the machine could be in is highlighted at once, and a dot travels along each transition taken, so branching is visible. ε-moves are supported.
 - **Explain the result**: Accepted or Rejected, with the reason and, when accepted, one accepting path.
 - **Report problems** before running: no start state, unlabelled transitions, symbols outside the alphabet, and so on.
-- **Export** to PNG, SVG, LaTeX (TikZ) and JSON, and **import** JSON.
+- **Export** to PNG, SVG, LaTeX (TikZ) and JSON, and **import** JSON. Every PNG and SVG is signed `Copyright Nafees Mansoor`.
 - Undo and redo, zoom and pan, touch input, and a layout that works on phones.
 
 Pushdown automata and Turing machines are not simulated.
@@ -64,11 +64,29 @@ Transition labels:
 
 ```sh
 npm install
-npm test            # simulator logic, no browser needed
+npm test            # simulator logic and the export signature, no browser needed
+npm run check:exports   # every PNG and SVG export goes through the signature
 npm run test:e2e    # drives the real page in headless Chrome
 ```
 
 The browser test looks for Chrome in the usual places; set `CHROME_PATH` if yours is elsewhere.
+
+## The export signature
+
+Every exported PNG and SVG carries the line `Copyright Nafees Mansoor`, bottom right, in a strip added under the drawing so it never covers a state or a label. It is not drawn on the board and is not stored in the machine. A PNG also carries it in the file's `Copyright` text field.
+
+All of it lives in `export-protection.js`. The Export dialog's PNG and SVG buttons, Download, Copy and `saveAsSVG()` are the only export routes, and each goes through it:
+
+| Check | When | What it stops |
+| --- | --- | --- |
+| The signed image is inspected: text, position, size, styling, PNG pixels and file field | On every export | An image that was not signed, or whose signature is hidden, moved or clipped. The dialog shows "Export blocked" and offers nothing to download |
+| Download and Copy accept only the image the signed export just made | On every download or copy | An unsigned image reaching the user by another path in the code |
+| `npm run check:exports` | Locally and in CI | A new export route, a canvas turned into an image outside the module, the module not loaded, a protected function removed |
+| Hashes in `tests/export-integrity.json` | Locally and in CI | A protected function changed without anyone reviewing the export tests |
+
+After changing a protected function on purpose, review the export tests and run `npm run check:exports -- --update`.
+
+**What this does not do.** StateTrace runs in the browser from public, MIT-licensed source. Anyone can edit the code, or the exported file, and remove the signature; the checks above catch mistakes and careless changes to this repository, not a person who sets out to defeat them. LaTeX and JSON exports are text sources and are not signed. A guarantee stronger than this needs exports made by a server you control.
 
 ## How it is organised
 
@@ -76,12 +94,14 @@ The browser test looks for Chrome in the usual places; set `CHROME_PATH` if your
 | --- | --- |
 | `index.html`, `styles.css` | The page and its styling |
 | `fsm.js` | The drawing editor: canvas, gestures, view, undo, SVG and LaTeX export |
+| `export-protection.js` | Signs and checks every PNG and SVG export; the only code that makes those files |
 | `simulator.js` | DFA/NFA logic. No DOM; it turns a machine and an input into a list of steps |
 | `simulator-ui.js` | The execution inspector and the animation on the board |
 | `workspace.js` | Toolbar, label box, zoom controls, help, import and export |
 | `fonts/` | Inter, JetBrains Mono and Chakra Petch (SIL Open Font License) |
-| `tests/` | Simulator tests and the browser test |
+| `tests/` | Simulator tests, export signature tests and the browser test |
 | `scripts/serve.mjs` | The local server behind `npm start` |
+| `scripts/check-exports.mjs` | The static check that no export goes around the signature |
 
 A machine is stored, exported and imported as JSON in this form:
 

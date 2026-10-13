@@ -1447,7 +1447,8 @@ function drawPlain(c) {
 function saveAsSVG() {
 	var exporter = new ExportAsSVG();
 	drawPlain(exporter);
-	var svgData = exporter.toSVG();
+	// signed, or refused: see export-protection.js
+	var svgData = ExportProtection.svg(exporter.toSVG());
 	output(svgData);
 	return svgData;
 }
