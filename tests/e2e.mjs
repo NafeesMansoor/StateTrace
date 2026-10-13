@@ -368,7 +368,6 @@ const pbox = async () => (await phone.$('#canvas')).boundingBox();
 const tap = async (x, y) => { const pb = await pbox(); await phone.touchscreen.tap(pb.x + x, pb.y + y); };
 const swipe = async (x1, y1, x2, y2) => { const pb = await pbox(); await phone.touchscreen.touchStart(pb.x + x1, pb.y + y1); for (let i = 1; i <= 5; i++) await phone.touchscreen.touchMove(pb.x + x1 + (x2 - x1) * i / 5, pb.y + y1 + (y2 - y1) * i / 5); await phone.touchscreen.touchEnd(); await sleep(700); };
 const pm = () => phone.evaluate(() => serializeMachine());
-const pstate = async (label) => log('phone', label, JSON.stringify(await phone.evaluate(() => ({ view, linkTool, selected: nodes.indexOf(selectedObject), nodes: nodes.map((n) => [n.text, Math.round(n.x), Math.round(n.y)]), links: links.length, scroll: [scrollX, scrollY], box: canvas.getBoundingClientRect().toJSON() }))));
 await tap(90, 200); await sleep(60); await tap(90, 200); // double tap: new state
 assert.equal((await pm()).nodes.length, 1);
 await phone.tap('#label-input'); await phone.keyboard.type('s');
@@ -380,8 +379,7 @@ await swipe(280, 200, 280, 330); // drag the state
 let p = await pm();
 assert.deepEqual(p.nodes.map((n) => [n.text, n.isAcceptState]), [['s', false], ['t', true]]);
 assert.ok(Math.abs(p.nodes[1].y - p.nodes[0].y - 130) < 2, 'dragging with a finger moves a state');
-await pstate('before transition');
-await phone.tap('#tool-transition'); await pstate('tool on'); await swipe(90, 200, 280, 330); await pstate('after swipe');
+await phone.tap('#tool-transition'); await swipe(90, 200, 280, 330);
 await phone.tap('#label-input'); await phone.keyboard.type('a');
 await sleep(400); await tap(90, 200); await phone.tap('#tool-start');
 p = await pm();
