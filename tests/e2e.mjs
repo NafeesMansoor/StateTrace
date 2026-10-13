@@ -190,6 +190,178 @@ for (const [fmt, name, probe] of [['svg', 'state-machine.svg', '<?xml'], ['latex
 }
 const json = await page.$eval('#output', (e) => e.value);
 assert.deepEqual(JSON.parse(json), await machine());
+// ---- every PNG and SVG export is signed ----
+const SIGNATURE = 'Copyright Nafees Mansoor';
+const PNG_FIELD = Buffer.from('tEXtCopyright\0' + SIGNATURE, 'latin1');
+const pngBytes = (url) => Buffer.from(url.slice('data:image/png;base64,'.length), 'base64');
+// what the browser makes of a signed SVG: where the signature and the drawing really end up
+const measureSVG = (target, source) => target.evaluate((source) => {
+  const doc = new DOMParser().parseFromString(source, 'image/svg+xml');
+  if (doc.querySelector('parsererror')) return { error: doc.querySelector('parsererror').textContent };
+  const host = document.createElement('div');
+  host.style.cssText = 'position:absolute;left:-99999px;top:0';
+  const root = host.appendChild(document.importNode(doc.documentElement, true));
+  document.body.appendChild(host);
+  const rect = (b) => ({ left: b.x, top: b.y, right: b.x + b.width, bottom: b.y + b.height });
+  const text = root.querySelector('#statetrace-signature text');
+  const drawn = [...root.children].filter((e) => e.id != 'statetrace-signature').map((e) => rect(e.getBBox()));
+  const out = {
+    viewBox: rect(root.viewBox.baseVal), size: [root.width.baseVal.value, root.height.baseVal.value], last: root.lastElementChild.id,
+    signature: rect(text.getBBox()), content: text.textContent, fontSize: parseFloat(text.getAttribute('font-size')),
+    drawingBottom: Math.max(...drawn.map((b) => b.bottom)), inspected: ExportProtection.inspectSVG(source).fontSize,
+  };
+  host.remove();
+  return out;
+}, source);
+const checkSVG = (m, name) => {
+  assert.equal(m.error, undefined, name + ': well formed');
+  assert.equal(m.content, SIGNATURE, name);
+  assert.equal(m.last, 'statetrace-signature', name + ': drawn last, so nothing covers it');
+  assert.ok(m.signature.left >= m.viewBox.left && m.signature.right <= m.viewBox.right && m.signature.bottom <= m.viewBox.bottom, name + ': not clipped ' + JSON.stringify(m));
+  assert.ok(m.signature.top >= m.drawingBottom, name + ': below the drawing, not over it');
+  assert.ok(m.viewBox.right - m.signature.right <= 1.5 * m.fontSize, name + ': at the right edge');
+  assert.ok(m.signature.bottom - m.signature.top < 2 * m.fontSize, name + ': one line');
+  assert.deepEqual(m.size, [m.viewBox.right - m.viewBox.left, m.viewBox.bottom - m.viewBox.top], name + ': drawn at its own scale');
+};
+// the pixels of a PNG export: the strip under the drawing, and the ink in each half of it
+const measurePNG = (target, url, background) => target.evaluate(async (url, background) => {
+  const image = new Image();
+  image.src = url;
+  await image.decode();
+  const c = document.createElement('canvas');
+  c.width = image.width; c.height = image.height;
+  const g = c.getContext('2d');
+  g.drawImage(image, 0, 0);
+  const box = contentBounds();
+  const drawing = (Math.ceil(box.bottom - box.top) + 48) * 2;
+  const strip = g.getImageData(0, drawing, c.width, c.height - drawing);
+  const ink = { left: 0, right: 0, minX: Infinity, maxX: -1, minY: Infinity, maxY: -1 };
+  for (let y = 0; y < strip.height; y++) for (let x = 0; x < strip.width; x++) {
+    const i = (y * strip.width + x) * 4;
+    if (background.some((v, k) => Math.abs(strip.data[i + k] - v) > 24)) {
+      ink[x < strip.width / 2 ? 'left' : 'right']++;
+      ink.minX = Math.min(ink.minX, x); ink.maxX = Math.max(ink.maxX, x); ink.minY = Math.min(ink.minY, y); ink.maxY = Math.max(ink.maxY, y);
+    }
+  }
+  return { width: c.width, height: c.height, drawing, expectedWidth: (Math.ceil(box.right - box.left) + 48) * 2, strip: strip.height, ink, file: ExportProtection.inspectPNG(Uint8Array.from(atob(url.slice(22)), (ch) => ch.charCodeAt(0))) };
+}, url, background);
+const checkPNG = (m, name) => {
+  assert.equal(m.width, m.expectedWidth, name + ': as wide as before');
+  assert.ok(m.strip > 0 && m.height == m.drawing + m.strip, name + ': a strip was added under the drawing');
+  assert.deepEqual([m.file.width, m.file.height], [m.width, m.height], name);
+  assert.ok(m.ink.right > 100, name + ': the signature is visible ' + JSON.stringify(m.ink));
+  assert.ok(m.ink.minX > 0 && m.ink.maxX < m.width - 4 && m.ink.minY > 0 && m.ink.maxY < m.strip - 2, name + ': not clipped ' + JSON.stringify(m));
+  assert.ok(m.width - m.ink.maxX < m.strip, name + ': at the right edge');
+};
+const BOARD = [9, 15, 36, 255];
+const fullGrab = () => page.evaluate(() => new Promise((resolve) => {
+  const orig = HTMLAnchorElement.prototype.click;
+  const timer = setTimeout(() => { HTMLAnchorElement.prototype.click = orig; resolve(null); }, 400);
+  HTMLAnchorElement.prototype.click = function () {
+    HTMLAnchorElement.prototype.click = orig; clearTimeout(timer);
+    if (this.href.startsWith('blob:')) fetch(this.href).then((r) => r.text()).then((body) => resolve({ name: this.download, body }));
+    else resolve({ name: this.download, body: this.href });
+  };
+  document.getElementById('export-download').click();
+}));
+const exportState = () => page.evaluate(() => ({
+  status: document.getElementById('export-status').textContent, download: document.getElementById('export-download').disabled, copy: document.getElementById('export-copy').disabled,
+  preview: document.getElementById('export-preview').getAttribute('src'), previewHidden: document.getElementById('export-preview').hidden, output: document.getElementById('output').value,
+}));
+
+// the SVG from the editor itself
+assert.equal(svg.split(SIGNATURE).length, 2, 'the SVG is signed once');
+const svgSeen = await measureSVG(page, svg);
+checkSVG(svgSeen, 'svg');
+log('svg signature:', JSON.stringify(svgSeen.signature), 'font', svgSeen.fontSize, 'in', JSON.stringify(svgSeen.viewBox));
+
+// PNG: the preview and the downloaded file are the same signed image
+await page.click('[data-format=png]');
+const preview = await page.$eval('#export-preview', (i) => i.src);
+assert.ok(pngBytes(preview).includes(PNG_FIELD), 'the PNG file carries the copyright field');
+const pngSeen = await measurePNG(page, preview, BOARD);
+checkPNG(pngSeen, 'png');
+assert.equal(pngSeen.ink.left, 0, 'the signature is on the right');
+log('png:', pngSeen.width + 'x' + pngSeen.height, 'strip', pngSeen.strip, 'ink', JSON.stringify(pngSeen.ink));
+let got = await fullGrab();
+assert.equal(got.name, 'state-machine.png'); assert.equal(got.body, preview, 'download gives the signed preview');
+assert.match((await exportState()).status, /^Downloaded/);
+
+// SVG: shown, downloaded and copied signed
+await page.click('[data-format=svg]');
+const shown = await page.$eval('#output', (e) => e.value);
+checkSVG(await measureSVG(page, shown), 'svg in the dialog');
+got = await fullGrab();
+assert.equal(got.name, 'state-machine.svg'); assert.equal(got.body, shown, 'download gives the signed SVG');
+await page.evaluate(() => { navigator.clipboard.writeText = (t) => { window.copied = t; return Promise.resolve(); }; });
+await page.click('#export-copy');
+assert.equal(await page.evaluate(() => window.copied), shown, 'copy gives the signed SVG');
+
+// an image that did not come from the last signed export is not handed out
+await page.evaluate(() => ExportProtection.svg('<svg width="300" height="200" viewBox="0 0 300 200" xmlns="http://www.w3.org/2000/svg"></svg>'));
+assert.equal(await fullGrab(), null, 'nothing is downloaded');
+let state = await exportState();
+assert.match(state.status, /^Export blocked: the image did not come from the signed export/);
+assert.deepEqual([state.download, state.copy, state.output], [true, true, '']);
+await page.click('[data-format=svg]');
+assert.equal((await fullGrab()).body, shown, 'exporting again works');
+
+// the signature cannot be drawn: no PNG
+await page.evaluate(() => { window.realFillText = CanvasRenderingContext2D.prototype.fillText; });
+await page.evaluate(() => { CanvasRenderingContext2D.prototype.fillText = function (t) { if (t != 'Copyright Nafees Mansoor') return window.realFillText.apply(this, arguments); }; });
+await page.click('[data-format=png]');
+state = await exportState();
+assert.match(state.status, /^Export blocked: the signature could not be drawn/);
+assert.deepEqual([state.download, state.copy, state.preview, state.previewHidden], [true, true, null, true], 'no unsigned image is shown or offered');
+assert.equal(await fullGrab(), null, 'nothing is downloaded');
+await page.evaluate(() => { CanvasRenderingContext2D.prototype.fillText = window.realFillText; });
+await page.click('[data-format=png]');
+assert.equal((await fullGrab()).body, preview, 'and it works again once the signature can be drawn');
+
+// the signing module is not there: no PNG and no SVG
+await page.evaluate(() => { window.realProtection = ExportProtection; ExportProtection = undefined; });
+for (const fmt of ['svg', 'png']) {
+  await page.click(`[data-format=${fmt}]`);
+  state = await exportState();
+  assert.match(state.status, /^Export blocked: the image could not be signed/, fmt);
+  assert.deepEqual([state.download, state.copy, state.preview, state.output], [true, true, null, ''], fmt);
+  assert.equal(await fullGrab(), null, fmt + ': nothing is downloaded');
+}
+await page.click('[data-format=json]');
+assert.deepEqual(JSON.parse(await page.$eval('#output', (e) => e.value)), await machine(), 'formats that are not images are unaffected');
+assert.equal((await exportState()).download, false);
+await page.evaluate(() => { ExportProtection = window.realProtection; });
+await page.click('[data-format=svg]');
+assert.equal(await page.$eval('#output', (e) => e.value), shown);
+await page.click('[data-format=png]');
+assert.equal(await page.$eval('#export-preview', (i) => i.src), preview, 'the same drawing exports to the same image');
+
+// a PNG without a background stays transparent everywhere but the signature
+const clear = await page.evaluate(async () => {
+  const source = document.createElement('canvas');
+  source.width = 600; source.height = 300;
+  const s = source.getContext('2d');
+  s.strokeStyle = '#3366ff'; s.lineWidth = 6; s.beginPath(); s.arc(300, 150, 90, 0, 2 * Math.PI); s.stroke();
+  const image = new Image();
+  image.src = ExportProtection.png(source);
+  await image.decode();
+  const c = document.createElement('canvas');
+  c.width = image.width; c.height = image.height;
+  const g = c.getContext('2d');
+  g.drawImage(image, 0, 0);
+  const before = s.getImageData(0, 0, 600, 300).data, after = g.getImageData(0, 0, 600, 300).data;
+  let changed = 0;
+  for (let i = 0; i < before.length; i++) if (before[i] != after[i]) changed++;
+  const strip = g.getImageData(0, 300, c.width, c.height - 300).data;
+  let inked = 0, inkedLeft = 0;
+  for (let i = 3; i < strip.length; i += 4) if (strip[i] > 0) { inked++; if (((i - 3) / 4) % c.width < 300) inkedLeft++; }
+  return { size: [c.width, c.height], changed, inked, inkedLeft, corner: [...g.getImageData(0, 0, 1, 1).data] };
+});
+log('transparent png:', JSON.stringify(clear));
+assert.equal(clear.changed, 0, 'the drawing and its transparency are untouched');
+assert.deepEqual(clear.corner, [0, 0, 0, 0]);
+assert.ok(clear.size[0] == 600 && clear.size[1] > 300 && clear.inked > 100 && clear.inkedLeft == 0, 'only the signature is added, bottom right');
+
 await page.keyboard.press('Escape');
 assert.equal(await page.$eval('#export-dialog', (d) => d.open), false);
 assert.ok(await page.evaluate(() => simulationHighlight != null), 'the trace is still on screen after exporting');
@@ -405,6 +577,32 @@ await calm.click('#sim-play'); // pause
 await calm.click('#sim-reset'); await calm.click('#sim-next');
 assert.deepEqual(await calm.evaluate(() => simulationHighlight.tokens), [], 'no travelling dots with reduced motion');
 assert.deepEqual(await calm.evaluate(() => Object.keys(simulationHighlight.nodes)), ['0', '1']);
+
+// ---- the signature on the smallest and on a very large drawing ----
+const sizes = await browser.newPage();
+await sizes.setViewport({ width: 1280, height: 800 });
+await sizes.goto(BASE + '/index.html', { waitUntil: 'networkidle0' });
+await sizes.evaluate(() => { localStorage.removeItem('fsm'); }); await sizes.reload({ waitUntil: 'networkidle0' });
+const fonts = [];
+for (const [name, nodes] of [
+  ['one state', [{ x: 0, y: 0, text: 'q0', isAcceptState: true }]],
+  ['large machine', [{ x: 0, y: 0, text: 'q0', isAcceptState: false }, { x: 2600, y: 0, text: 'q1', isAcceptState: false }, { x: 2600, y: 1700, text: 'q2', isAcceptState: true }, { x: 0, y: 1700, text: 'q3', isAcceptState: false }]],
+]) {
+  const stored = await sizes.evaluate((nodes) => { loadMachine({ nodes, links: [] }); return JSON.stringify(serializeMachine()); }, nodes);
+  const seen = await measureSVG(sizes, await sizes.evaluate(() => saveAsSVG()));
+  checkSVG(seen, name + ' svg');
+  await sizes.click('#export-button');
+  const url = await sizes.$eval('#export-preview', (i) => i.src);
+  assert.ok(pngBytes(url).includes(PNG_FIELD), name);
+  const pixels = await measurePNG(sizes, url, BOARD);
+  checkPNG(pixels, name + ' png');
+  await sizes.keyboard.press('Escape');
+  assert.equal(await sizes.evaluate(() => JSON.stringify(serializeMachine())), stored, name + ': exporting does not change the machine');
+  log(name + ':', 'svg', JSON.stringify(seen.size), 'font', seen.fontSize, '| png', pixels.width + 'x' + pixels.height, 'signature', (pixels.ink.maxX - pixels.ink.minX + 1) + 'x' + (pixels.ink.maxY - pixels.ink.minY + 1));
+  fonts.push([seen.fontSize, pixels.ink.maxY - pixels.ink.minY]);
+}
+assert.ok(fonts[0][0] >= 6 && fonts[0][0] < fonts[1][0] && fonts[0][1] < fonts[1][1], 'the signature grows with the drawing');
+await sizes.close();
 
 log('problems:', JSON.stringify(problems));
 assert.deepEqual(problems, []);

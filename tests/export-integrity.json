@@ -1,0 +1,55 @@
+{
+  "about": "Hashes of the code that signs PNG and SVG exports. scripts/check-exports.mjs fails when one changes; review tests/export-protection.test.mjs and the export part of tests/e2e.mjs, then run: npm run check:exports -- --update",
+  "signature": "Copyright Nafees Mansoor",
+  "protected": [
+    {
+      "file": "export-protection.js",
+      "sha256": "b60a92668c146d82d4ed1737b3ce4b2fca53b1be509c924734d153b1c8df317f"
+    },
+    {
+      "file": "fsm.js",
+      "function": "ExportAsSVG",
+      "sha256": "44b0d3ab74c406548c1ff2da53fffe76c990071b4d3b5c34794807d90aec67ab"
+    },
+    {
+      "file": "fsm.js",
+      "function": "drawPlain",
+      "sha256": "6286ab5026d19c7bb7cf77aed85c166e85d409070f230c631ef5040eb4838651"
+    },
+    {
+      "file": "fsm.js",
+      "function": "saveAsSVG",
+      "sha256": "d07a314c1258725cd58ac4f525943a5df5e612f3da739182c1614b3868cc381f"
+    },
+    {
+      "file": "workspace.js",
+      "function": "renderPNG",
+      "sha256": "0e4b02efaf53b35972205bd7f10b2a14733bbf655f7bd50e24323145d3c72cdb"
+    },
+    {
+      "file": "workspace.js",
+      "function": "blockExport",
+      "sha256": "94699d3e97a6869d97ba59fc1e759a634a53da00884c093dc546f88ede4df8d6"
+    },
+    {
+      "file": "workspace.js",
+      "function": "verified",
+      "sha256": "3b91fc62d65dcbf666b4edd04fd4595590f1c14a329eb0c31e790e4b07e0c0f3"
+    },
+    {
+      "file": "workspace.js",
+      "function": "setFormat",
+      "sha256": "5381f0551ba449a1381193a553921d88ee8226056985c0be67c602fa7e509db8"
+    },
+    {
+      "file": "workspace.js",
+      "function": "download",
+      "sha256": "bad60c7b9447b6684060b74df48784a26ee7a44fd9ae62c6f10ff85d6b2036e4"
+    },
+    {
+      "file": "workspace.js",
+      "function": "copy",
+      "sha256": "002aa1b141cbba41582c99af682d041e134d6982636fd0abcba72f7585e28706"
+    }
+  ]
+}

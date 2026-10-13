@@ -18,7 +18,9 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Simulator tests
+      - name: Export protection check
+        run: npm run check:exports
+      - name: Simulator and export tests
         run: npm test
       - name: Browser tests
         run: npm run test:e2e
